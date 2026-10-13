@@ -39,10 +39,9 @@ vulnerabilidade.
 
 | Nome | RM |
 | --- | --- |
-| _preencher_ | _preencher_ |
-| _preencher_ | _preencher_ |
-| _preencher_ | _preencher_ |
-| _preencher_ | _preencher_ |
+| Guilherme Abe | RM554743 |
+| Gustavo Ruiz Vieira Paulino | RM554779 |
+| Victor Pacifico Dias | RM558017 |
 
 ---
 
