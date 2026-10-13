@@ -80,7 +80,14 @@ jobs:
           PY
       - name: Logs em caso de falha
         if: failure()
-        run: docker compose logs --no-color
+        run: |
+          docker compose ps -a
+          docker compose logs --no-color --tail 60
+          # Também como anotação, para aparecer no resumo do job.
+          for svc in api worker-analysis worker-ai; do
+            msg=$(docker compose logs --no-color --tail 25 "$svc" 2>&1 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')
+            echo "::error title=logs $svc::$msg"
+          done
       - name: Derrubar
         if: always()
         run: docker compose down -v
