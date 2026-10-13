@@ -1,191 +1,314 @@
-# 🛡️ Sentinela — Plataforma SAST & DevSecOps
+# Sentinela
+
+**Plataforma SAST & DevSecOps.** O Sentinela analisa o código-fonte de cada
+Pull Request **sem executá-lo**, em **Python, JavaScript e Java**.
+
+Para cada vulnerabilidade, ele entrega:
+
+- a causa, a evidência e o **caminho do dado** (de onde veio o valor não
+  confiável até a função perigosa);
+- a correção recomendada, com um exemplo de código seguro.
+
+Uma IA local (Llama 3 via Ollama) revisa cada achado para separar
+vulnerabilidades reais de falsos positivos. Um **Security Gate** no GitHub
+Actions comenta no PR e bloqueia o merge quando há evidência forte.
 
 > Projeto Integrador · Engenharia de Software (3º ano) · FIAP 2026
 > Prof. M.Sc. Oerton Fernandes
 
-O Sentinela analisa código-fonte **sem executá-lo** (SAST) em **Python,
-JavaScript e Java**. Ele rastreia o caminho de dados não confiáveis até
-funções perigosas (taint analysis) e usa um **LLM local (Llama 3 via Ollama)**
-para separar vulnerabilidades reais de falsos positivos e sugerir a correção.
-Tudo isso roda dentro do pipeline: um **Security Gate** no GitHub Actions
-comenta cada Pull Request e bloqueia o merge quando há evidência forte de
-vulnerabilidade.
-
-![Dashboard executivo do Sentinela](docs/img/dashboard.png)
-
----
-
-## Sumário
-
-- [Integrantes](#integrantes)
-- [Entregáveis e critérios](#entregáveis-e-critérios)
-- [Arquitetura](#arquitetura)
-- [Como rodar](#como-rodar)
-- [Como usar](#como-usar)
-- [Motor de análise](#motor-de-análise)
-- [IA local](#ia-local)
-- [Security Gate](#security-gate)
-- [Dashboard e relatórios](#dashboard-e-relatórios)
-- [Benchmark](#benchmark)
-- [Testes e qualidade](#testes-e-qualidade)
-- [Configuração](#configuração)
-- [Estrutura do repositório](#estrutura-do-repositório)
-- [Limitações conhecidas](#limitações-conhecidas)
-- [Ética](#ética)
-
----
-
-## Integrantes
-
-| Nome | RM |
+| Integrante | RM |
 | --- | --- |
 | Guilherme Abe | RM554743 |
 | Gustavo Ruiz Vieira Paulino | RM554779 |
 | Victor Pacifico Dias | RM558017 |
 
----
+O repositório tem quatro partes:
 
-## Entregáveis e critérios
+- **`sentinela/`:** o motor de análise (parsers, regras, taint analysis,
+  segredos), a API FastAPI, os workers Celery, o módulo de IA e a CLI.
+- **`sentinela/api/static/`:** o dashboard executivo (HTML + JavaScript +
+  Chart.js, servido pela própria API).
+- **`benchmark/`:** um corpus de código rotulado e o script que mede
+  precisão e recall.
+- **`.github/workflows/` e `action.yml`:** o Security Gate, que pode ser
+  usado neste ou em qualquer outro repositório.
 
-### CP1 — Fundação e parsers
+## Screenshots
 
-| Entregável | Onde |
-| --- | --- |
-| Diagrama de arquitetura técnica | [`docs/architecture/c4.md`](docs/architecture/c4.md): contexto, containers, componentes e sequência |
-| Repositório com Docker Compose | [`docker-compose.yml`](docker-compose.yml): API, 2 workers, PostgreSQL, Redis e Ollama |
-| Parser de código funcional | Tree-sitter para 3 linguagens: [`sentinela/engine/languages/`](sentinela/engine/languages/) |
-| Detecção de violações iniciais | Senhas/tokens hardcoded, `eval`, comandos de shell — 26 regras de padrão + 20 sinks de taint em [`sentinela/rules/`](sentinela/rules/) |
+**Dashboard executivo:** severidade, tendência de falhas por scan, top
+arquivos críticos, OWASP Top 10 e resultado da triagem por IA.
 
-### CP2 — IA e análise semântica
+![Dashboard do Sentinela](docs/img/dashboard.png)
 
-| Entregável | Onde |
-| --- | --- |
-| Módulo de taint analysis | [`sentinela/engine/taint.py`](sentinela/engine/taint.py): fontes → sanitizadores → sinks, com análise entre funções |
-| Integração com LLM local | Ollama + Llama 3: [`sentinela/ai/assistant.py`](sentinela/ai/assistant.py) |
-| Classificação de severidade e redução de FP | Veredito, confiança e severidade sugerida para cada achado |
-| Sugestões de remediação | Código corrigido gerado pela IA, mais exemplo seguro revisado em cada regra |
-| Demo de varredura semântica | [`docs/demo.md`](docs/demo.md) e o [benchmark](#benchmark) |
+**Detalhe de um achado:** caminho do dado (fonte → propagação → sink), análise da IA, correção e botões de revisão.
 
-### CP3 — DevSecOps e entrega
+![Detalhe de um achado com o caminho do dado](docs/img/achado.png)
 
-| Entregável | Onde |
-| --- | --- |
-| Plataforma SAST funcional | API, workers, CLI e dashboard; 63 testes automatizados |
-| Integração CI/CD com Security Gates | [`.github/workflows/security-gate.yml`](.github/workflows/security-gate.yml) e a action reutilizável [`action.yml`](action.yml) |
-| Dashboard e relatórios analíticos | Dashboard web, SARIF 2.1.0, relatório Markdown e JSON |
-| Defesa técnica e documentação | Este README, os diagramas C4, 4 ADRs e o [roteiro de demo](docs/demo.md) |
-
-### Como o projeto atende os critérios de avaliação
-
-| Critério | Peso | Evidência |
-| --- | ---: | --- |
-| Arquitetura | 25% | AST via Tree-sitter com adaptadores por linguagem; API, worker de análise e worker de IA como serviços separados; filas Redis; tudo em Docker |
-| Robustez SAST | 30% | Regras declarativas, taint analysis com sanitizadores e análise entre funções, segundo motor (Bandit), fingerprint estável. Benchmark: 100% de recall, contra 59% do Bandit sozinho |
-| Inovação IA | 20% | Llama 3 local com contexto de código e caminho do dado; veredito de falso positivo, severidade e correção; segredos mascarados; circuit breaker |
-| DevSecOps | 15% | Action reutilizável, comentário automático no PR, SARIF na aba Security, política por repositório, gate baseado em evidência |
-| Defesa | 10% | ADRs justificando cada decisão, benchmark reproduzível e limitações declaradas |
-
----
-
-## Arquitetura
+## Como um scan funciona
 
 ```mermaid
-flowchart LR
-    dev([Dev]) -->|Pull Request| gh[GitHub Actions<br/>Security Gate]
-    gh -->|CLI sentinela| eng
-    dash([Revisor]) --> api
-    gh -. opcional .-> api[API FastAPI<br/>+ Dashboard]
-    api -->|enfileira| redis[(Redis)]
-    redis -->|fila analysis| wa[worker-analysis<br/>Tree-sitter · regras · taint · Bandit]
-    redis -->|fila ai| wi[worker-ai]
-    wi --> llm[Ollama · Llama 3]
-    wa --> pg[(PostgreSQL)]
-    wi --> pg
-    api --> pg
-    wa -.mesmo motor.- eng[Motor SAST]
+sequenceDiagram
+    participant Dev as PR / CLI / Dashboard
+    participant API as API (FastAPI)
+    participant Fila as Redis
+    participant WA as worker-analysis
+    participant WI as worker-ai
+    participant LLM as Ollama (Llama 3)
+    participant DB as PostgreSQL
+
+    Dev->>API: POST /api/scans (arquivos)
+    API->>DB: scan "queued"
+    API->>Fila: analyze(scan)
+    API-->>Dev: 202 {id, status: queued}
+    Fila->>WA: analyze
+    WA->>WA: Tree-sitter → regras → segredos → taint → Bandit
+    WA->>DB: achados
+    WA->>Fila: assess × N (um por achado)
+    Fila->>WI: assess
+    WI->>LLM: código + caminho do dado
+    LLM-->>WI: veredito + correção (JSON)
+    WI->>DB: análise da IA
+    Fila->>WA: finalize
+    WA->>DB: decisão do Security Gate, scan "completed"
 ```
 
-**Como um scan percorre o sistema**
+A análise determinística e a IA rodam em **filas e workers separados**. A
+IA leva segundos por achado e não atrasa a análise de outros PRs, e cada
+tipo de worker escala sozinho (`docker compose up --scale worker-ai=3`).
 
-1. A API grava o scan e enfileira a análise.
-2. O `worker-analysis` roda o motor e grava os achados.
-3. Um *chord* do Celery dispara uma avaliação por achado na fila `ai`.
-4. Quando todas terminam, o `finalize` calcula o Security Gate.
+Os diagramas C4 (contexto, containers e componentes) estão em
+[`docs/architecture/c4.md`](docs/architecture/c4.md).
 
-O PostgreSQL é o único estado compartilhado, então API e workers escalam
-separadamente:
+## Principais características
 
-```bash
-docker compose up --scale worker-analysis=3 --scale worker-ai=2
-```
-
-Os detalhes ficam em [`docs/architecture/c4.md`](docs/architecture/c4.md). As decisões de projeto estão nos ADRs:
-
-- [0001 — Motor multi-linguagem via adaptadores](docs/adr/0001-ir-multilinguagem.md)
-- [0002 — IA consultiva](docs/adr/0002-ia-consultiva.md)
-- [0003 — Filas separadas](docs/adr/0003-filas-separadas.md)
-- [0004 — Gate por evidência forte](docs/adr/0004-evidencia-forte.md)
-
-**Stack:** Python 3.12 · Tree-sitter · Bandit · FastAPI · PostgreSQL 16 ·
-SQLAlchemy/Alembic · Redis · Celery · Ollama (Llama 3) · Chart.js · Docker ·
-GitHub Actions.
-
----
+- **Uma implementação para três linguagens.** O Tree-sitter gera a AST de
+  Python, JavaScript e Java, e um adaptador por linguagem responde às
+  mesmas perguntas: qual o nome da chamada, se o argumento é constante,
+  qual variável a atribuição define. Regras e taint analysis são escritas
+  uma vez sobre esse contrato.
+- **Regras declarativas em YAML.** São 26 regras de padrão
+  ([`sentinela/rules/`](sentinela/rules/)) e 20 sinks de taint analysis,
+  todos mapeados para CWE e OWASP Top 10.
+- **Taint analysis com caminho do dado.** Fontes (`request.args`,
+  `req.query`, `@RequestParam`...) são rastreadas por atribuições até
+  sinks (SQL, shell, `eval`, arquivos, URLs, HTML). Sanitizadores (`int()`,
+  `shlex.quote`, `parseInt`, `Integer.parseInt`...) interrompem o fluxo, e
+  há análise entre funções do mesmo arquivo.
+- **Segredos nunca vazam.** Credenciais detectadas (AWS, GitHub, Stripe,
+  JWT, chaves privadas, senhas por nome e entropia) aparecem mascaradas no
+  relatório, no banco e no contexto enviado à IA.
+- **Bandit como segundo motor.** Em Python, quando o Bandit concorda com um
+  achado, ele ganha mais um sinal independente.
+- **A IA recomenda, o revisor decide.** O veredito do Llama 3 não muda
+  status nem o gate; prováveis falsos positivos só ficam recolhidos no
+  comentário do PR. Sem Ollama, tudo funciona igual.
+- **O gate só bloqueia com evidência forte.** Bloquear exige fluxo de dados
+  comprovado, dois motores concordando ou token em formato de provedor.
+  Evidência única vira aviso.
+- **Revisão que sobrevive a novos scans.** O fingerprint não usa o número
+  da linha. Um achado marcado como falso positivo ou risco aceito continua
+  assim mesmo que o código mude de lugar.
 
 ## Como rodar
 
-### Docker (stack completa)
+### Docker Compose (stack completa)
 
 ```bash
 git clone https://github.com/GusRVPaulino/sast-devsecops-fiap.git
 cd sast-devsecops-fiap
 
-docker compose up --build                  # sem IA
-docker compose --profile ai up --build     # com Ollama + Llama 3 (~4,7 GB na 1ª vez)
+docker compose up --build                  # API, dashboard, workers, PostgreSQL, Redis
+docker compose --profile ai up --build     # + Ollama com Llama 3 (~4,7 GB na 1ª vez)
 ```
 
 - **Dashboard:** http://localhost:8000
-- **API interativa:** http://localhost:8000/docs
+- **Documentação da API:** http://localhost:8000/docs
 - **Dados de demonstração:** `docker compose exec api python scripts/seed_demo.py`
 
-### Local (sem Docker)
+### Local, sem Docker
 
 ```bash
 pip install -e ".[dev]"
-sentinela serve                 # API + dashboard em http://localhost:8000 (SQLite, modo inline)
+sentinela serve          # API + dashboard em http://localhost:8000 (SQLite, sem filas)
 ```
 
----
-
-## Como usar
-
-### CLI
+### Linha de comando
 
 ```bash
-sentinela scan src/                                   # analisa um diretório
-sentinela scan . --diff origin/main                   # só arquivos alterados no PR
-sentinela scan . --ai                                 # com triagem por IA (Ollama local)
-sentinela scan . --sarif out.sarif --markdown pr.md --json out.json
-sentinela scan . --api http://localhost:8000 --project minha-api   # registra no dashboard
+sentinela scan src/                                  # analisa um diretório
+sentinela scan . --diff origin/main                  # só os arquivos alterados
+sentinela scan . --ai                                # com triagem pelo Llama 3
+sentinela scan . --sarif out.sarif --markdown pr.md  # relatórios
 ```
 
-A saída mostra cada achado com o caminho do dado, e o código de saída segue
-o gate:
+O código de saída segue o gate: `0` aprovado, `1` bloqueado.
 
-- **0:** aprovado ou com avisos;
-- **1:** bloqueado.
+## Teste de ponta a ponta
+
+```bash
+curl -s -X POST localhost:8000/api/scans -H "Content-Type: application/json" -d '{
+  "project": "demo",
+  "files": [{"path": "app/relatorios.py", "content":
+    "from flask import request\ndef relatorio(cursor):\n    cliente = request.args.get(\"cliente\")\n    cursor.execute(f\"SELECT * FROM vendas WHERE cliente = '"'"'{cliente}'"'"'\")\n"}]
+}'
+# → {"id": "...", "status": "queued", ...}
+
+curl -s localhost:8000/api/scans/<id>             # aguarde status "completed"
+curl -s localhost:8000/api/scans/<id>/findings    # achados
+curl -s localhost:8000/api/scans/<id>/sarif       # relatório SARIF 2.1.0
+```
+
+Este é o comentário real que o Security Gate publicou no
+[PR #1](https://github.com/GusRVPaulino/sast-devsecops-fiap/pull/1) (o PR
+de demonstração deste repositório), resumido:
+
+```text
+⛔ Security Gate: bloqueado
+🟥 critical: 1 · 🟨 medium: 1
+
+SQL Injection (dado externo chega à consulta) — exemplos/relatorios.py:17 (CWE-89, confiança high)
+Dado vindo de `request.args` chega a `cursor.execute` sem sanitização.
+
+Caminho do dado:
+1. linha 14 (source):      cliente = request.args.get("cliente")
+2. linha 15 (propagation): consulta = f"SELECT * FROM vendas WHERE cliente = '{cliente}'"
+3. linha 17 (sink):        cursor.execute(consulta)
+
+Como corrigir: passe o valor como parâmetro da consulta, nunca interpolado no SQL.
+```
+
+## API
+
+| Método | Endpoint | Descrição |
+| --- | --- | --- |
+| `POST` | `/api/scans` | Envia arquivos (JSON) para análise |
+| `POST` | `/api/scans/upload` | Envia um `.zip` |
+| `GET` | `/api/scans/{id}` | Status do scan e decisão do gate |
+| `GET` | `/api/scans/{id}/findings` | Achados (filtros: `severity`, `status`, `ai_verdict`) |
+| `GET` | `/api/scans/{id}/gate` | Decisão do Security Gate e motivos |
+| `GET` | `/api/scans/{id}/sarif` | Relatório SARIF 2.1.0 |
+| `GET` | `/api/scans/{id}/report.md` | Relatório em Markdown (o mesmo do PR) |
+| `PATCH` | `/api/findings/{id}` | Revisão: `confirmed`, `false_positive`, `accepted_risk`, `fixed` |
+| `GET` | `/api/projects/{nome}/metrics` | Dados do dashboard |
+| `GET` | `/api/rules` | Catálogo de regras |
+
+## Configuração
+
+Variáveis de ambiente (prefixo `SENTINELA_`):
+
+| Variável | Padrão | Descrição |
+| --- | --- | --- |
+| `DATABASE_URL` | `sqlite:///./sentinela.db` | PostgreSQL no Compose |
+| `EXECUTION_MODE` | `inline` | `queue` usa Redis + workers (padrão no Compose) |
+| `REDIS_URL` | `redis://localhost:6379/0` | Broker do Celery |
+| `AI_ENABLED` | `true` | Triagem por IA |
+| `OLLAMA_URL` / `OLLAMA_MODEL` | `http://localhost:11434` / `llama3` | LLM local |
+| `USE_BANDIT` | `true` | Bandit como segundo motor |
+| `API_TOKEN` | — | Se definido, a escrita na API exige o header `X-API-Token` |
+
+A política do Security Gate fica em [`.sentinela.yml`](.sentinela.yml):
+
+```yaml
+gate:
+  fail_on: high                  # severidade mínima que pode bloquear
+  require_strong_evidence: true  # taint, dois motores ou token de provedor
+  ignore_paths: ["tests/fixtures/*"]
+```
+
+## Benchmark
+
+O corpus em [`benchmark/corpus/`](benchmark/corpus/) tem 37 vulnerabilidades
+rotuladas (`# expect: CWE-N`) nas três linguagens. Para cada linguagem há
+três tipos de arquivo: código vulnerável, código seguro parecido e código
+seguro que engana as regras.
+
+```bash
+python -m benchmark.run_benchmark          # motores determinísticos
+python -m benchmark.run_benchmark --ai     # + triagem pelo Llama 3
+```
+
+| Configuração | Precisão | Recall | F1 |
+| --- | ---: | ---: | ---: |
+| Regras de padrão | 72% | 70% | 0.71 |
+| Regras + taint analysis | 76% | 100% | 0.86 |
+| Sentinela (regras + taint + Bandit) | 76% | 100% | 0.86 |
+| Sentinela + triagem por IA (Llama 3 8B) | 77% | 100% | 0.87 |
+| Bandit sozinho (só Python) | 59% | 59% | 0.59 |
+
+**O que os números mostram**
+
+- **A taint analysis leva o recall a 100%:** as regras de padrão sozinhas
+  perdem 11 das 37 vulnerabilidades.
+- **A triagem pelo Llama 3 foi conservadora:** removeu 1 dos 12 falsos
+  positivos sem descartar nenhuma vulnerabilidade real.
+
+Os detalhes estão em [`benchmark/RESULTS.md`](benchmark/RESULTS.md) e
+[`benchmark/RESULTS-IA.md`](benchmark/RESULTS-IA.md).
+
+## Testes
+
+```bash
+pytest                                  # 63 testes: unitários e de integração
+ruff check . && ruff format --check .
+```
+
+Nenhum teste precisa de PostgreSQL, Redis ou Ollama rodando. O modo fila é
+testado com Celery em modo síncrono, e a IA com respostas simuladas.
+
+O CI ([`ci.yml`](.github/workflows/ci.yml)) roda, a cada push:
+
+- lint, testes e benchmark;
+- build da imagem Docker;
+- a stack completa do `docker-compose`, com um scan de ponta a ponta pela
+  API.
+
+## Estrutura do projeto
 
 ```
-CRITICAL java/PedidoController.java:18  SQL Injection (dado externo chega à consulta) (CWE-89)
-         ResultSet rs = stmt.executeQuery(sql);
-           ↳ linha 14 source: @RequestParam String cliente
-           ↳ linha 17 propagation: String sql = "SELECT * FROM pedidos WHERE cliente = '" + cliente + "'";
-           ↳ linha 18 sink: ResultSet rs = stmt.executeQuery(sql);
-
-Security Gate: BLOQUEADO
+sentinela/
+├── engine/
+│   ├── languages/     Tree-sitter + adaptadores (python, javascript, java)
+│   ├── rules.py       motor de regras declarativas
+│   ├── taint.py       taint analysis + análise entre funções
+│   ├── secrets.py     detector de credenciais
+│   ├── external/      Bandit
+│   └── scanner.py     orquestração do scan
+├── rules/             regras YAML e especificação de taint
+├── ai/assistant.py    integração com Ollama / Llama 3
+├── gate.py            política e decisão do Security Gate
+├── services.py        casos de uso (usados pela API, workers e CLI)
+├── worker/tasks.py    Celery: filas analysis e ai
+├── api/               FastAPI + dashboard
+├── reporting/         SARIF e Markdown
+├── storage/           modelos SQLAlchemy + migrações Alembic
+└── cli.py             comando `sentinela`
+benchmark/             corpus rotulado + medição de precisão/recall
+docs/                  diagramas C4, ADRs, roteiro de demonstração
+tests/                 testes unitários e de integração
 ```
 
-### Em qualquer repositório (GitHub Actions)
+## Decisões de projeto
+
+Cada decisão está registrada em um ADR em [`docs/adr/`](docs/adr/):
+
+1. [Um motor, três linguagens, via adaptadores sobre o Tree-sitter](docs/adr/0001-ir-multilinguagem.md)
+2. [A IA recomenda; o gate decide com evidência determinística](docs/adr/0002-ia-consultiva.md)
+3. [Duas filas: análise determinística e IA](docs/adr/0003-filas-separadas.md)
+4. [O gate só bloqueia com evidência forte](docs/adr/0004-evidencia-forte.md)
+
+## CI: o Security Gate no próprio repositório
+
+O workflow [`security-gate.yml`](.github/workflows/security-gate.yml) usa o
+próprio Sentinela em cada Pull Request:
+
+1. Analisa só os arquivos alterados.
+2. Publica o resultado como comentário no PR, atualizando o mesmo
+   comentário a cada push.
+3. Envia o SARIF para a aba **Security** do GitHub.
+4. Falha o check quando o gate bloqueia.
+
+A mesma lógica está empacotada como GitHub Action ([`action.yml`](action.yml))
+e pode ser usada em outro repositório:
 
 ```yaml
 - uses: actions/checkout@v4
@@ -195,310 +318,25 @@ Security Gate: BLOQUEADO
     diff-base: origin/${{ github.base_ref }}
 ```
 
-### API
-
-| Método | Endpoint | Para quê |
-| --- | --- | --- |
-| `POST` | `/api/scans` | Envia arquivos (JSON) para análise |
-| `POST` | `/api/scans/upload` | Envia um `.zip` |
-| `GET` | `/api/scans/{id}` | Status: `queued` → `analyzing` → `ai_review` → `completed` |
-| `GET` | `/api/scans/{id}/findings` | Achados com caminho do dado, IA e correção (filtros: `severity`, `status`, `ai_verdict`) |
-| `GET` | `/api/scans/{id}/gate` | Decisão do Security Gate |
-| `GET` | `/api/scans/{id}/sarif` | Relatório SARIF 2.1.0 |
-| `GET` | `/api/scans/{id}/report.md` | Relatório Markdown |
-| `PATCH` | `/api/findings/{id}` | Revisão: `confirmed`, `false_positive`, `accepted_risk`, `fixed` |
-| `GET` | `/api/projects/{nome}/metrics` | Dados do dashboard |
-| `GET` | `/api/rules` | Catálogo de regras |
-
----
-
-## Motor de análise
-
-```
-arquivo → Tree-sitter → LanguageAdapter → regras YAML ┐
-                                        → segredos    ├→ fusão → Bandit → contexto → fingerprint
-                                        → taint       ┘
-```
-
-### Regras declarativas (26 regras de padrão)
-
-As regras ficam em [`sentinela/rules/{python,javascript,java}.yml`](sentinela/rules/).
-Exemplo:
-
-```yaml
-- id: python.command.subprocess-shell
-  severity: high
-  cwe: CWE-78
-  match:
-    call: ["subprocess.run", "subprocess.Popen", ...]
-    kwarg_equals: {shell: "True"}
-    arg_not_constant: 0        # comando fixo não é reportado
-```
-
-O motor resolve aliases de import (`import subprocess as sp`,
-`const { exec } = require("child_process")`). Em Java, ele usa o tipo
-declarado da variável: `Statement stmt` faz `stmt.executeQuery` virar
-`Statement.executeQuery`.
-
-### Taint analysis (20 sinks nas 3 linguagens)
-
-A especificação fica em [`sentinela/rules/taint.yml`](sentinela/rules/taint.yml).
-
-**Fontes**
-
-| Linguagem | Exemplos |
-| --- | --- |
-| Python | `request.args`, `request.form`, `input()` |
-| JavaScript | `req.query`, `req.body`, `location.hash` |
-| Java | `getParameter`, parâmetros `@RequestParam` e `@PathVariable` |
-
-**Sanitizadores** interrompem o fluxo: `int()`, `shlex.quote`, `parseInt`,
-`path.basename`, `Integer.parseInt`, `encodeForHTML`...
-
-**Sinks** cobrem SQL Injection, Command Injection, Code Injection, Path
-Traversal, SSRF, XSS, Open Redirect e Log Injection.
-
-**Entre funções:** se `buscar(id)` repassa `id` a um `execute`, a chamada
-`buscar(req.query.id)` é detectada. Uma função que retorna dado de fonte
-também vira fonte.
-
-### Segredos (CWE-798)
-
-O detector funciona em duas frentes:
-
-- **Formato de provedor:** AWS, GitHub, Slack, Stripe, Google, JWT, chave
-  privada e URL com senha.
-- **Nome + valor:** `password`, `apiKey`, `client_secret`..., com filtro de
-  placeholder, entropia mínima e severidade reduzida em arquivos de teste.
-
-O valor **nunca** aparece no relatório: nem no snippet, nem na mensagem, nem
-no contexto enviado à IA.
-
-### Bandit como segundo motor
-
-Em arquivos Python, quando o Bandit aponta a mesma linha com CWE compatível,
-o achado ganha o motor `bandit`. São duas implementações independentes
-concordando, o que conta como evidência forte para o gate.
-
-### Fingerprint
-
-O fingerprint é um hash da regra, do arquivo e do texto normalizado da
-linha, sem o número da linha. Inserir código acima não cria um achado
-"novo", e a decisão do revisor (falso positivo, risco aceito) continua
-valendo.
-
----
-
-## IA local
-
-Para cada achado, o Llama 3 recebe:
-
-- a regra e a CWE;
-- o **caminho do dado**;
-- **±8 linhas de código**, com credenciais já mascaradas.
-
-Ele devolve um JSON validado:
-
-```json
-{"verdict": "false_positive", "confidence": "high",
- "rationale": "Linha 15 valida `ordem` contra COLUNAS antes da consulta.",
- "suggested_severity": "low",
- "fix_explanation": "...", "fix_code": "..."}
-```
-
-**Princípios** ([ADR 0002](docs/adr/0002-ia-consultiva.md)):
-
-- **A IA recomenda, não decide.** Ela não altera status nem o gate.
-  Prováveis falsos positivos ficam recolhidos no comentário do PR, e quem
-  fecha o achado é um revisor.
-- **Respostas reproduzíveis.** As chamadas usam `temperature: 0` e
-  `format: json`; respostas fora do esquema são descartadas.
-- **Sem Ollama, tudo funciona igual.** A primeira falha de conexão desliga
-  a IA pelo resto do scan (circuit breaker).
-
----
-
-## Security Gate
-
-A política fica em [`.sentinela.yml`](.sentinela.yml), por repositório:
-
-```yaml
-gate:
-  fail_on: high                 # severidade mínima que pode bloquear
-  require_strong_evidence: true
-  ignore_paths: ["tests/fixtures/*"]
-```
-
-**Evidência forte** é qualquer um destes casos
-([ADR 0004](docs/adr/0004-evidencia-forte.md)):
-
-- fluxo de dados comprovado;
-- dois motores concordando;
-- token em formato de provedor.
-
-Achados com evidência única viram **aviso**. Decisões do revisor removem o
-achado do gate; o veredito da IA, não.
-
-**O que o workflow faz em cada PR**
-
-1. Analisa só os arquivos alterados.
-2. Comenta no PR e atualiza o mesmo comentário a cada push.
-3. Publica o resumo no job.
-4. Envia o SARIF para a aba Security.
-5. Falha o check se o gate bloquear.
-
----
-
-## Dashboard e relatórios
-
-- **Visão geral:** KPIs, severidade, tendência de falhas por scan, top 5
-  arquivos críticos, OWASP Top 10, CWEs mais frequentes e resultado da
-  triagem por IA.
-- **Scan:** motivos do gate e lista de achados com filtros (severidade,
-  status, veredito da IA). Cada achado expande para mostrar o código, o
-  caminho do dado, a análise da IA, a correção e os botões de revisão.
-- **Regras:** catálogo completo.
-- **Relatórios:** SARIF 2.1.0 (com *code flows* do taint), Markdown e JSON.
-
-![Detalhe de um achado com o caminho do dado](docs/img/achado.png)
-
-O dashboard é HTML e JavaScript puro, com o Chart.js embutido. Funciona sem
-internet e escapa todo conteúdo exibido, porque ele mostra código
-vulnerável e não pode ser vulnerável a XSS.
-
----
-
-## Benchmark
-
-O corpus rotulado fica em [`benchmark/corpus/`](benchmark/corpus/). Uma linha
-com `# expect: CWE-N` é uma vulnerabilidade real; o resto conta como falso
-positivo. Há três tipos de arquivo por linguagem: vulnerável, seguro
-parecido e **falso positivo semântico** (código seguro que só uma leitura do
-contexto revela).
-
-```bash
-python -m benchmark.run_benchmark          # motores determinísticos
-python -m benchmark.run_benchmark --ai     # + triagem pelo Llama 3
-```
-
-| Configuração | Precisão | Recall | F1 |
-| --- | ---: | ---: | ---: |
-| Regras de padrão (AST) | 72% | 70% | 0.71 |
-| Regras + taint analysis | 76% | **100%** | 0.86 |
-| **Sentinela** (regras + taint + Bandit) | **76%** | **100%** | **0.86** |
-| Bandit sozinho (só Python) | 59% | 59% | 0.59 |
-| **Sentinela + triagem por IA** (Llama 3 8B) | **77%** | **100%** | **0.87** |
-
-**Como ler esses números**
-
-- **Taint é o que leva o recall a 100%:** as regras de padrão sozinhas
-  perdem 11 das 37 vulnerabilidades.
-- **No Python, o Sentinela supera o Bandit:** encontra 17 de 17, contra 10
-  de 17.
-- **Os falsos positivos restantes são semânticos:** quase todos estão nos
-  arquivos `falsos_positivos_semanticos.*`. É o espaço da triagem por IA.
-- **Resultado medido da IA:** com o Llama 3 8B rodando em CPU (workflow
-  [Benchmark com IA](.github/workflows/benchmark-ia.yml), resultado em
-  [`benchmark/RESULTS-IA.md`](benchmark/RESULTS-IA.md)), a triagem removeu
-  **1 dos 12 falsos positivos sem perder nenhuma vulnerabilidade real**. O
-  modelo foi conservador, como o prompt pede ("na dúvida, não diga falso
-  positivo"). Ganho de precisão pequeno, recall intacto: para um gate de
-  segurança, errar para o lado seguro é o comportamento desejado. Modelos
-  maiores ou ajuste do prompt são o próximo passo natural.
-
-O detalhe completo está em [`benchmark/RESULTS.md`](benchmark/RESULTS.md).
-
-> O corpus foi escrito pelo grupo junto com as regras: ele serve como teste
-> de regressão, não como prova de generalização. Para uma medida externa,
-> rode o motor em projetos open source propositalmente vulneráveis
-> (DVWA-like, OWASP NodeGoat, WebGoat) e rotule as falhas conhecidas.
-
----
-
-## Testes e qualidade
-
-```bash
-pytest          # 63 testes
-ruff check . && ruff format --check .
-```
-
-| Tipo | Cobre |
-| --- | --- |
-| Unitários | Regras e taint em cada linguagem, sanitizadores, análise entre funções, fusão de motores, fingerprint, segredos (o valor nunca vaza), gate, IA (parsing, circuit breaker, prompt sem segredo), SARIF e Markdown |
-| Integração | Fluxo completo da API, revisão que sobrevive a novos scans, upload `.zip` (zip slip e `node_modules`), token da API, pipeline em fila (Celery), CLI e regressão do benchmark |
-
-O workflow de CI ([`ci.yml`](.github/workflows/ci.yml)) roda lint, testes,
-benchmark e build da imagem Docker com smoke test.
-
----
-
-## Configuração
-
-Variáveis de ambiente (prefixo `SENTINELA_`):
-
-| Variável | Padrão | Descrição |
-| --- | --- | --- |
-| `DATABASE_URL` | `sqlite:///./sentinela.db` | PostgreSQL em produção |
-| `EXECUTION_MODE` | `inline` | `queue`: usa Redis e os workers (padrão no Compose) |
-| `REDIS_URL` | `redis://localhost:6379/0` | Broker do Celery |
-| `AI_ENABLED` | `true` | Liga a triagem por IA |
-| `OLLAMA_URL` / `OLLAMA_MODEL` | `http://localhost:11434` / `llama3` | LLM local |
-| `OLLAMA_TIMEOUT` | `60` | Segundos por achado |
-| `USE_BANDIT` | `true` | Bandit como segundo motor |
-| `API_TOKEN` | — | Se definido, escrita na API exige o header `X-API-Token` |
-| `MAX_UPLOAD_MB` | `20` | Tamanho máximo do `.zip` |
-
----
-
-## Estrutura do repositório
-
-```
-sentinela/
-├── engine/
-│   ├── languages/        Tree-sitter + adaptadores (python, javascript, java)
-│   ├── rules.py          motor de regras declarativas
-│   ├── taint.py          taint analysis + resumo entre funções
-│   ├── secrets.py        detector de credenciais
-│   ├── external/         Bandit
-│   └── scanner.py        orquestração
-├── rules/                regras YAML e especificação de taint
-├── ai/assistant.py       Ollama / Llama 3
-├── gate.py               política e decisão do Security Gate
-├── services.py           casos de uso (API, workers e CLI)
-├── worker/tasks.py       Celery: filas analysis e ai
-├── api/                  FastAPI + dashboard (static/)
-├── reporting/            SARIF e Markdown
-├── storage/              modelos SQLAlchemy + migrações Alembic
-└── cli.py                comando `sentinela`
-benchmark/                corpus rotulado + medição
-docs/                     C4, ADRs, roteiro de demo, imagens
-tests/                    unitários e integração
-action.yml                GitHub Action reutilizável
-docker-compose.yml        stack completa
-```
-
----
-
 ## Limitações conhecidas
 
-- **Taint intraprocedural com um nível entre funções do mesmo arquivo.**
-  Fluxos que atravessam arquivos ou passam por atributos de objeto não são
+- **Alcance da taint analysis:** segue o fluxo dentro de cada função e um
+  nível entre funções do mesmo arquivo. Fluxos entre arquivos não são
   seguidos.
-- **Sem resolução de tipos completa.** Em Python e JS, regras de método
-  (`*.execute`) dependem do nome; em Java, do tipo declarado localmente.
-- **Bandit só para Python.** JS e Java contam apenas com os motores próprios.
-- **Upload de SARIF em repositório privado** exige GitHub Advanced Security;
-  sem ele, o relatório fica como artefato do job.
-- **Qualidade da IA.** A triagem depende do modelo. O Llama 3 8B erra em
-  código longo ou muito indireto, e por isso a IA é apenas consultiva.
-
----
+- **Resolução de tipos:** não há resolução completa. Em Java, o motor usa o
+  tipo declarado das variáveis; em Python e JS, regras de método dependem
+  do nome.
+- **Bandit:** cobre só Python.
+- **Qualidade da IA:** depende do modelo. Com o Llama 3 8B, a triagem foi
+  conservadora; por isso ela é apenas consultiva.
+- **SARIF em repositório privado:** a aba Security exige GitHub Advanced
+  Security em repositórios privados. Sem ela, o relatório fica como
+  artefato do job.
+- **Origem do corpus:** o benchmark foi escrito pelo grupo. Ele serve como
+  teste de regressão, não como prova de generalização.
 
 ## Ética
 
-O código analisado nos testes e no benchmark foi escrito pelo grupo
-especificamente para isso. Para analisar código de terceiros, use apenas
-repositórios próprios, autorizados ou de código aberto.
-
-A IA roda **localmente**: nenhum trecho de código sai da máquina, e
-credenciais são mascaradas antes até de chegar ao modelo local.
+O código usado nos testes e no benchmark foi escrito pelo grupo para esse
+fim. A IA roda localmente (nenhum código sai da máquina), e credenciais
+detectadas são mascaradas antes de chegar ao modelo.
