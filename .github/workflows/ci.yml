@@ -47,7 +47,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Subir a stack
-        run: docker compose up -d --build --wait api worker-analysis worker-ai
+        run: |
+          docker compose up -d --build api worker-analysis worker-ai
+          for i in $(seq 1 60); do
+            curl -sf http://localhost:8000/health && exit 0
+            sleep 2
+          done
+          echo "API não ficou saudável" >&2
+          exit 1
       - name: Scan de ponta a ponta pela API
         run: |
           python3 - <<'PY'
