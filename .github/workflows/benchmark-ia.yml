@@ -1,0 +1,53 @@
+name: Benchmark com IA
+
+# Roda o benchmark de precisão/recall com o Llama 3 de verdade (Ollama em CPU).
+# Demora (cada achado passa pelo modelo), por isso é disparado manualmente.
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Modelo do Ollama"
+        default: "llama3"
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e .
+
+      - name: Instalar Ollama e baixar o modelo
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          (ollama serve > ollama.log 2>&1 &)
+          sleep 5
+          ollama pull "${{ inputs.model }}"
+
+      - name: Benchmark
+        run: |
+          python - <<'PY'
+          import benchmark.run_benchmark as b
+          from sentinela.ai.assistant import OllamaAssistant
+
+          assistant = OllamaAssistant(base_url="http://localhost:11434", model="${{ inputs.model }}", timeout=600)
+          assert assistant.health(), "Ollama não respondeu"
+          expected, results = b.run(assistant)
+          report = b.render(expected, results)
+          open("benchmark/RESULTS-IA.md", "w", encoding="utf-8").write(report)
+          print(report)
+          PY
+          cat benchmark/RESULTS-IA.md >> "$GITHUB_STEP_SUMMARY"
+          msg=$(sed 's/%/%25/g' benchmark/RESULTS-IA.md | awk '{printf "%s%%0A", $0}')
+          echo "::notice title=Benchmark com IA::$msg"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: benchmark-ia
+          path: |
+            benchmark/RESULTS-IA.md
+            ollama.log
