@@ -387,6 +387,7 @@ python -m benchmark.run_benchmark --ai     # + triagem pelo Llama 3
 | Regras + taint analysis | 76% | **100%** | 0.86 |
 | **Sentinela** (regras + taint + Bandit) | **76%** | **100%** | **0.86** |
 | Bandit sozinho (só Python) | 59% | 59% | 0.59 |
+| **Sentinela + triagem por IA** (Llama 3 8B) | **77%** | **100%** | **0.87** |
 
 **Como ler esses números**
 
@@ -395,8 +396,15 @@ python -m benchmark.run_benchmark --ai     # + triagem pelo Llama 3
 - **No Python, o Sentinela supera o Bandit:** encontra 17 de 17, contra 10
   de 17.
 - **Os falsos positivos restantes são semânticos:** quase todos estão nos
-  arquivos `falsos_positivos_semanticos.*`. É o espaço que a triagem por IA
-  deve recuperar, e o modo `--ai` mede isso.
+  arquivos `falsos_positivos_semanticos.*`. É o espaço da triagem por IA.
+- **Resultado medido da IA:** com o Llama 3 8B rodando em CPU (workflow
+  [Benchmark com IA](.github/workflows/benchmark-ia.yml), resultado em
+  [`benchmark/RESULTS-IA.md`](benchmark/RESULTS-IA.md)), a triagem removeu
+  **1 dos 12 falsos positivos sem perder nenhuma vulnerabilidade real**. O
+  modelo foi conservador, como o prompt pede ("na dúvida, não diga falso
+  positivo"). Ganho de precisão pequeno, recall intacto: para um gate de
+  segurança, errar para o lado seguro é o comportamento desejado. Modelos
+  maiores ou ajuste do prompt são o próximo passo natural.
 
 O detalhe completo está em [`benchmark/RESULTS.md`](benchmark/RESULTS.md).
 
