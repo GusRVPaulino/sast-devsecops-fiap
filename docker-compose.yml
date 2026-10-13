@@ -1,0 +1,85 @@
+# Sentinela — stack completa.
+#
+#   docker compose up --build                  # API + dashboard + workers + Postgres + Redis
+#   docker compose --profile ai up --build     # ... + Ollama com Llama 3 (≈4,7 GB no 1º uso)
+#   docker compose up --scale worker-analysis=3
+#
+# Dashboard: http://localhost:8000   ·   API: http://localhost:8000/docs
+
+x-app: &app
+  build: .
+  environment: &env
+    SENTINELA_DATABASE_URL: postgresql+psycopg://sentinela:sentinela@postgres:5432/sentinela
+    SENTINELA_REDIS_URL: redis://redis:6379/0
+    SENTINELA_EXECUTION_MODE: queue
+    SENTINELA_AI_ENABLED: "true"
+    SENTINELA_OLLAMA_URL: http://ollama:11434
+    SENTINELA_OLLAMA_MODEL: llama3
+    SENTINELA_OLLAMA_TIMEOUT: "120"
+  depends_on:
+    postgres:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: sentinela
+      POSTGRES_PASSWORD: sentinela
+      POSTGRES_DB: sentinela
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U sentinela"]
+      interval: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      retries: 10
+
+  api:
+    <<: *app
+    command: ["api"]
+    ports:
+      - "8000:8000"
+
+  worker-analysis:
+    <<: *app
+    command: ["worker-analysis"]
+    healthcheck:
+      disable: true
+
+  worker-ai:
+    <<: *app
+    command: ["worker-ai"]
+    healthcheck:
+      disable: true
+
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    volumes:
+      - ollama:/root/.ollama
+    ports:
+      - "11434:11434"
+
+  # Baixa o modelo uma vez para o volume compartilhado e encerra.
+  ollama-pull:
+    image: ollama/ollama:latest
+    profiles: ["ai"]
+    depends_on: [ollama]
+    environment:
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "sleep 3 && ollama pull llama3"]
+    volumes:
+      - ollama:/root/.ollama
+
+volumes:
+  pgdata:
+  ollama:

@@ -1,0 +1,133 @@
+# Regras determinísticas para JavaScript (Node.js e navegador).
+# Matcher extra: member_assign (atribuição a propriedade, ex. el.innerHTML = x)
+
+language: javascript
+rules:
+  - id: javascript.code.eval
+    title: Execução dinâmica de código (eval / new Function)
+    severity: high
+    cwe: CWE-95
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["eval", "window.eval", "new Function", "Function", "vm.runInThisContext", "vm.runInNewContext"]
+      arg_not_constant: 0
+    message: >-
+      O argumento é interpretado como código JavaScript. Um valor controlado
+      pelo usuário vira execução de código arbitrário.
+    remediation: Use JSON.parse para dados e um mapa de funções permitidas para ações.
+    example: |
+      const acoes = { atualizar: atualizarPainel };
+      const acao = acoes[nome];
+      if (!acao) throw new Error("ação inválida");
+      acao();
+
+  - id: javascript.code.string-timer
+    title: setTimeout/setInterval com string
+    severity: medium
+    cwe: CWE-95
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["setTimeout", "setInterval", "window.setTimeout", "window.setInterval"]
+      arg_dynamic_string: 0
+    message: Passar uma string para o timer faz o navegador avaliá-la como código.
+    remediation: Passe uma função em vez de uma string.
+    example: |
+      setTimeout(() => atualizar(id), 1000);
+
+  - id: javascript.command.child-process
+    title: child_process com comando variável
+    severity: high
+    cwe: CWE-78
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["child_process.exec", "child_process.execSync"]
+      arg_not_constant: 0
+    message: >-
+      exec/execSync executam a string em um shell; partes variáveis permitem
+      injetar comandos.
+    remediation: Use execFile/spawn com lista de argumentos e sem shell.
+    example: |
+      const { execFile } = require("child_process");
+      execFile("ping", ["-c", "1", host], callback);
+
+  - id: javascript.command.spawn-shell
+    title: spawn/execFile com shell habilitado
+    severity: high
+    cwe: CWE-78
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["child_process.spawn", "child_process.spawnSync", "child_process.execFile", "child_process.execFileSync"]
+      kwarg_equals: {shell: "true"}
+    message: "A opção shell: true reintroduz a interpretação do comando pelo shell."
+    remediation: "Remova shell: true e passe os argumentos como array."
+    example: |
+      spawn("convert", [arquivo, "saida.png"]);
+
+  - id: javascript.xss.dom-sink
+    title: HTML dinâmico inserido no DOM
+    severity: high
+    cwe: CWE-79
+    owasp: "A03:2021 - Injection"
+    match:
+      member_assign: ["innerHTML", "outerHTML"]
+      value_not_constant: true
+    message: >-
+      Atribuir HTML montado com dados variáveis a innerHTML/outerHTML executa
+      scripts injetados (XSS baseado em DOM).
+    remediation: Use textContent para texto ou sanitize com DOMPurify antes de inserir HTML.
+    example: |
+      elemento.textContent = comentario;
+
+  - id: javascript.xss.document-write
+    title: document.write com conteúdo variável
+    severity: high
+    cwe: CWE-79
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["document.write", "document.writeln", "*.insertAdjacentHTML"]
+      arg_not_constant: 0
+    message: document.write e insertAdjacentHTML interpretam o conteúdo como HTML.
+    remediation: Crie nós com document.createElement e preencha com textContent.
+    example: |
+      const item = document.createElement("li");
+      item.textContent = nome;
+      lista.appendChild(item);
+
+  - id: javascript.sql.string-built-query
+    title: SQL montado por concatenação/template
+    severity: medium
+    cwe: CWE-89
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["*.query", "*.execute", "*.raw", "*.$queryRawUnsafe", "*.$executeRawUnsafe"]
+      arg_dynamic_string: 0
+    message: A consulta SQL é montada com valores interpolados.
+    remediation: Use consultas parametrizadas (placeholders ? ou $1).
+    example: |
+      await db.query("SELECT * FROM users WHERE id = $1", [id]);
+
+  - id: javascript.crypto.weak-hash
+    title: Hash criptográfico fraco (MD5/SHA-1)
+    severity: medium
+    cwe: CWE-327
+    owasp: "A02:2021 - Cryptographic Failures"
+    match:
+      call: ["crypto.createHash"]
+      arg_in: {index: 0, values: ["md5", "sha1", "MD5", "SHA1", "sha-1"]}
+    message: MD5 e SHA-1 não são seguros para senhas, assinaturas ou integridade.
+    remediation: Use SHA-256 para integridade e bcrypt/argon2/scrypt para senhas.
+    example: |
+      crypto.createHash("sha256").update(dados).digest("hex");
+
+  - id: javascript.tls.reject-unauthorized
+    title: Verificação TLS desativada (rejectUnauthorized false)
+    severity: high
+    cwe: CWE-295
+    owasp: "A02:2021 - Cryptographic Failures"
+    match:
+      call: ["https.request", "https.get", "tls.connect", "new https.Agent", "new Agent", "axios.*"]
+      kwarg_equals: {rejectUnauthorized: "false"}
+    message: rejectUnauthorized false aceita qualquer certificado.
+    remediation: Mantenha a verificação e configure a CA confiável em `ca`.
+    example: |
+      new https.Agent({ ca: fs.readFileSync("ca-interna.pem") });

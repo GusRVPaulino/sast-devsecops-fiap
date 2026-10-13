@@ -1,0 +1,322 @@
+# Especificação da taint analysis por linguagem.
+#
+# sources.members      acessos a membro que trazem dado externo (glob sobre o nome pontuado)
+# sources.calls        chamadas que retornam dado externo
+# sources.param_annotations  parâmetros anotados (Java/Spring) que chegam do usuário
+# sanitizers           chamadas que neutralizam o dado (o resultado deixa de ser contaminado)
+# sinks                chamadas perigosas; `args` diz quais argumentos importam (padrão: 0)
+
+python:
+  sources:
+    members:
+      - "request.args*"
+      - "request.form*"
+      - "request.values*"
+      - "request.json*"
+      - "request.data*"
+      - "request.files*"
+      - "request.cookies*"
+      - "request.headers*"
+      - "request.GET*"
+      - "request.POST*"
+      - "request.COOKIES*"
+      - "request.META*"
+      - "request.query_params*"
+      - "request.path_params*"
+      - "sys.argv*"
+    calls:
+      - "input"
+      - "request.get_json"
+      - "request.get_data"
+      - "request.args.get"
+      - "request.form.get"
+      - "request.values.get"
+      - "request.cookies.get"
+      - "request.headers.get"
+      - "request.GET.get"
+      - "request.POST.get"
+  sanitizers:
+    - "int"
+    - "float"
+    - "bool"
+    - "uuid.UUID"
+    - "shlex.quote"
+    - "os.path.basename"
+    - "werkzeug.utils.secure_filename"
+    - "secure_filename"
+    - "html.escape"
+    - "markupsafe.escape"
+    - "bleach.clean"
+    - "urllib.parse.quote"
+    - "re.escape"
+  sinks:
+    - id: python.taint.sql-injection
+      title: SQL Injection (dado externo chega à consulta)
+      severity: critical
+      cwe: CWE-89
+      owasp: "A03:2021 - Injection"
+      calls: ["*.execute", "*.executemany", "*.executescript", "*.raw", "sqlalchemy.text", "text"]
+      remediation: Passe o valor como parâmetro da consulta, nunca interpolado no SQL.
+      example: |
+        cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+    - id: python.taint.command-injection
+      title: Command Injection (dado externo chega ao shell)
+      severity: critical
+      cwe: CWE-78
+      owasp: "A03:2021 - Injection"
+      calls: ["os.system", "os.popen", "subprocess.getoutput", "subprocess.getstatusoutput"]
+      remediation: Use subprocess.run com lista de argumentos e valide o valor contra uma allowlist.
+      example: |
+        subprocess.run(["ping", "-c", "1", host], check=True)
+    - id: python.taint.command-injection-shell
+      title: Command Injection (shell=True com dado externo)
+      severity: critical
+      cwe: CWE-78
+      owasp: "A03:2021 - Injection"
+      calls: ["subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.Popen"]
+      require_kwarg: {shell: "True"}
+      remediation: Remova shell=True e passe o comando como lista.
+      example: |
+        subprocess.run(["convert", nome, "out.png"], check=True)
+    - id: python.taint.code-injection
+      title: Code Injection (dado externo chega ao eval/exec)
+      severity: critical
+      cwe: CWE-95
+      owasp: "A03:2021 - Injection"
+      calls: ["eval", "exec", "builtins.eval", "builtins.exec"]
+      remediation: Use ast.literal_eval/json.loads para dados e uma allowlist de funções para ações.
+      example: |
+        valor = ast.literal_eval(texto)
+    - id: python.taint.path-traversal
+      title: Path Traversal (dado externo define caminho de arquivo)
+      severity: high
+      cwe: CWE-22
+      owasp: "A01:2021 - Broken Access Control"
+      calls: ["open", "io.open", "os.remove", "os.unlink", "shutil.rmtree", "flask.send_file", "send_file", "pathlib.Path"]
+      remediation: Resolva o caminho final e confirme que ele continua dentro do diretório base permitido.
+      example: |
+        base = Path("/srv/arquivos").resolve()
+        alvo = (base / Path(nome).name).resolve()
+        if not alvo.is_relative_to(base):
+            raise PermissionError("caminho fora do diretório permitido")
+    - id: python.taint.ssrf
+      title: SSRF (dado externo define a URL requisitada)
+      severity: high
+      cwe: CWE-918
+      owasp: "A10:2021 - Server-Side Request Forgery"
+      calls: ["requests.get", "requests.post", "requests.put", "requests.delete", "requests.request", "httpx.get", "httpx.post", "urllib.request.urlopen", "urlopen"]
+      remediation: Aceite só hosts de uma allowlist, bloqueie IPs internos e desative redirecionamentos.
+      example: |
+        if urlparse(url).hostname not in HOSTS_PERMITIDOS:
+            raise ValueError("destino não permitido")
+    - id: python.taint.xss-template
+      title: XSS (dado externo em template sem escape)
+      severity: high
+      cwe: CWE-79
+      owasp: "A03:2021 - Injection"
+      calls: ["flask.render_template_string", "render_template_string", "markupsafe.Markup", "Markup", "jinja2.Template"]
+      remediation: Use templates com autoescape e passe o dado como variável, nunca como parte do template.
+      example: |
+        render_template("perfil.html", nome=nome)
+
+javascript:
+  sources:
+    members:
+      - "req.query*"
+      - "req.body*"
+      - "req.params*"
+      - "req.cookies*"
+      - "req.headers*"
+      - "request.query*"
+      - "request.body*"
+      - "request.params*"
+      - "ctx.query*"
+      - "ctx.request.body*"
+      - "location.search*"
+      - "location.hash*"
+      - "location.href*"
+      - "document.location*"
+      - "document.URL*"
+      - "document.cookie*"
+      - "window.location*"
+      - "process.argv*"
+    calls:
+      - "req.get"
+      - "req.header"
+      - "prompt"
+      - "URLSearchParams.get"
+      - "*.searchParams.get"
+  sanitizers:
+    - "parseInt"
+    - "parseFloat"
+    - "Number"
+    - "encodeURIComponent"
+    - "encodeURI"
+    - "DOMPurify.sanitize"
+    - "*.sanitize"
+    - "escape"
+    - "validator.escape"
+    - "path.basename"
+    - "shellescape"
+  sinks:
+    - id: javascript.taint.sql-injection
+      title: SQL Injection (dado externo chega à consulta)
+      severity: critical
+      cwe: CWE-89
+      owasp: "A03:2021 - Injection"
+      calls: ["*.query", "*.execute", "*.raw", "*.$queryRawUnsafe", "*.$executeRawUnsafe"]
+      remediation: Use consultas parametrizadas.
+      example: |
+        await db.query("SELECT * FROM users WHERE id = $1", [id]);
+    - id: javascript.taint.command-injection
+      title: Command Injection (dado externo chega ao shell)
+      severity: critical
+      cwe: CWE-78
+      owasp: "A03:2021 - Injection"
+      calls: ["child_process.exec", "child_process.execSync"]
+      remediation: Use execFile/spawn com lista de argumentos e sem shell.
+      example: |
+        execFile("ping", ["-c", "1", host], callback);
+    - id: javascript.taint.code-injection
+      title: Code Injection (dado externo chega ao eval)
+      severity: critical
+      cwe: CWE-95
+      owasp: "A03:2021 - Injection"
+      calls: ["eval", "new Function", "Function", "vm.runInThisContext", "vm.runInNewContext", "setTimeout", "setInterval"]
+      remediation: Nunca avalie entrada como código; use JSON.parse e um mapa de ações permitidas.
+      example: |
+        const dados = JSON.parse(texto);
+    - id: javascript.taint.path-traversal
+      title: Path Traversal (dado externo define caminho de arquivo)
+      severity: high
+      cwe: CWE-22
+      owasp: "A01:2021 - Broken Access Control"
+      calls: ["fs.readFile", "fs.readFileSync", "fs.createReadStream", "fs.writeFile", "fs.writeFileSync", "fs.unlink", "fs.unlinkSync", "*.sendFile", "*.download"]
+      remediation: Resolva o caminho e confirme que ele começa com o diretório base.
+      example: |
+        const alvo = path.resolve(BASE, path.basename(nome));
+        if (!alvo.startsWith(BASE + path.sep)) throw new Error("caminho inválido");
+    - id: javascript.taint.ssrf
+      title: SSRF (dado externo define a URL requisitada)
+      severity: high
+      cwe: CWE-918
+      owasp: "A10:2021 - Server-Side Request Forgery"
+      calls: ["fetch", "axios.get", "axios.post", "axios", "http.get", "https.get", "http.request", "https.request", "got", "needle.get"]
+      remediation: Valide o host contra uma allowlist e bloqueie endereços internos.
+      example: |
+        if (!HOSTS_PERMITIDOS.has(new URL(url).hostname)) throw new Error("destino não permitido");
+    - id: javascript.taint.xss
+      title: XSS (dado externo vai para o HTML)
+      severity: high
+      cwe: CWE-79
+      owasp: "A03:2021 - Injection"
+      calls: ["document.write", "document.writeln", "*.insertAdjacentHTML", "res.send", "res.write"]
+      member_assign: ["innerHTML", "outerHTML"]
+      remediation: Use textContent no navegador e escape/template com autoescape no servidor.
+      example: |
+        elemento.textContent = nome;
+    - id: javascript.taint.open-redirect
+      title: Open Redirect
+      severity: medium
+      cwe: CWE-601
+      owasp: "A01:2021 - Broken Access Control"
+      calls: ["res.redirect", "*.redirect"]
+      remediation: Redirecione apenas para caminhos relativos ou destinos de uma allowlist.
+      example: |
+        const destino = DESTINOS_PERMITIDOS.has(next) ? next : "/";
+        res.redirect(destino);
+
+java:
+  sources:
+    members: []
+    calls:
+      - "*.getParameter"
+      - "*.getParameterValues"
+      - "*.getParameterMap"
+      - "*.getHeader"
+      - "*.getQueryString"
+      - "*.getCookies"
+      - "*.getInputStream"
+      - "*.getReader"
+      - "*.getPathInfo"
+      - "*.getRequestURI"
+    param_annotations:
+      - "RequestParam"
+      - "PathVariable"
+      - "RequestBody"
+      - "RequestHeader"
+      - "CookieValue"
+      - "QueryParam"
+      - "PathParam"
+      - "FormParam"
+  sanitizers:
+    - "Integer.parseInt"
+    - "Long.parseLong"
+    - "Integer.valueOf"
+    - "Long.valueOf"
+    - "UUID.fromString"
+    - "*.encodeForHTML"
+    - "*.encodeForSQL"
+    - "HtmlUtils.htmlEscape"
+    - "StringEscapeUtils.escapeHtml4"
+    - "FilenameUtils.getName"
+    - "Paths.get.getFileName"
+  sinks:
+    - id: java.taint.sql-injection
+      title: SQL Injection (dado externo chega à consulta)
+      severity: critical
+      cwe: CWE-89
+      owasp: "A03:2021 - Injection"
+      calls: ["*.executeQuery", "*.executeUpdate", "*.execute", "*.addBatch", "*.prepareStatement", "*.createQuery", "*.createNativeQuery", "*.queryForObject", "*.queryForList", "*.update"]
+      remediation: Use PreparedStatement com parâmetros (?).
+      example: |
+        PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+        ps.setString(1, id);
+    - id: java.taint.command-injection
+      title: Command Injection (dado externo chega ao processo)
+      severity: critical
+      cwe: CWE-78
+      owasp: "A03:2021 - Injection"
+      calls: ["Runtime.getRuntime.exec", "Runtime.exec", "new ProcessBuilder"]
+      args: any
+      remediation: Use ProcessBuilder com executável fixo e argumentos validados por allowlist.
+      example: |
+        new ProcessBuilder("ping", "-c", "1", hostValidado).start();
+    - id: java.taint.path-traversal
+      title: Path Traversal (dado externo define caminho de arquivo)
+      severity: high
+      cwe: CWE-22
+      owasp: "A01:2021 - Broken Access Control"
+      calls: ["new File", "new FileInputStream", "new FileReader", "new FileOutputStream", "Paths.get", "Path.of", "Files.readAllBytes", "Files.readString", "Files.delete"]
+      args: any
+      remediation: Normalize o caminho e confirme que ele permanece dentro do diretório base.
+      example: |
+        Path alvo = base.resolve(nome).normalize();
+        if (!alvo.startsWith(base)) throw new SecurityException("caminho inválido");
+    - id: java.taint.ssrf
+      title: SSRF (dado externo define a URL requisitada)
+      severity: high
+      cwe: CWE-918
+      owasp: "A10:2021 - Server-Side Request Forgery"
+      calls: ["new URL", "URI.create", "*.getForObject", "*.getForEntity", "*.exchange", "HttpRequest.newBuilder"]
+      remediation: Valide o host contra uma allowlist e bloqueie endereços internos.
+      example: |
+        if (!HOSTS_PERMITIDOS.contains(uri.getHost())) throw new SecurityException("destino não permitido");
+    - id: java.taint.xss
+      title: XSS (dado externo escrito na resposta HTML)
+      severity: high
+      cwe: CWE-79
+      owasp: "A03:2021 - Injection"
+      calls: ["*.getWriter.print", "*.getWriter.println", "*.getWriter.write", "PrintWriter.print", "PrintWriter.println", "PrintWriter.write"]
+      remediation: Escape a saída (OWASP Java Encoder) ou use um template engine com autoescape.
+      example: |
+        out.println(Encode.forHtml(nome));
+    - id: java.taint.log-injection
+      title: Log Injection (dado externo gravado no log)
+      severity: low
+      cwe: CWE-117
+      owasp: "A09:2021 - Security Logging and Monitoring Failures"
+      calls: ["*.info", "*.warn", "*.error", "*.debug"]
+      remediation: Remova quebras de linha do valor ou use logging estruturado com parâmetros ({}).
+      example: |
+        log.info("login falhou para {}", usuario.replaceAll("[\\r\\n]", ""));

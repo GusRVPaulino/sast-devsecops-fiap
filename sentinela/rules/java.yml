@@ -1,0 +1,104 @@
+# Regras determinísticas para Java.
+# Nomes de chamada usam o TIPO declarado da variável quando conhecido:
+#   Statement stmt = ...; stmt.executeQuery(x)  ->  Statement.executeQuery
+
+language: java
+rules:
+  - id: java.command.runtime-exec
+    title: Runtime.exec com comando variável
+    severity: high
+    cwe: CWE-78
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["Runtime.getRuntime.exec", "Runtime.exec"]
+      arg_not_constant: 0
+    message: >-
+      O comando executado é montado com valores variáveis. Combinado com
+      um shell (sh -c), permite injetar comandos.
+    remediation: >-
+      Use ProcessBuilder com lista de argumentos fixos e valide o valor
+      contra uma allowlist.
+    example: |
+      new ProcessBuilder("ping", "-c", "1", hostValidado).start();
+
+  - id: java.command.process-builder
+    title: ProcessBuilder com comando variável
+    severity: medium
+    cwe: CWE-78
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["new ProcessBuilder"]
+      arg_not_constant: 0
+    message: O processo é criado a partir de valores variáveis.
+    remediation: Fixe o executável e valide cada argumento contra uma allowlist.
+    example: |
+      new ProcessBuilder(List.of("convert", nomeValidado, "saida.png")).start();
+
+  - id: java.sql.string-built-query
+    title: SQL montado por concatenação
+    severity: medium
+    cwe: CWE-89
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["*.executeQuery", "*.executeUpdate", "*.execute", "*.addBatch", "*.prepareStatement", "*.createQuery", "*.createNativeQuery"]
+      arg_dynamic_string: 0
+    message: A consulta SQL é montada concatenando valores.
+    remediation: Use PreparedStatement com parâmetros (?) e setString/setInt.
+    example: |
+      PreparedStatement ps = conn.prepareStatement("SELECT * FROM users WHERE id = ?");
+      ps.setString(1, id);
+      ResultSet rs = ps.executeQuery();
+
+  - id: java.deserialization.object-input-stream
+    title: Desserialização Java nativa (ObjectInputStream)
+    severity: high
+    cwe: CWE-502
+    owasp: "A08:2021 - Software and Data Integrity Failures"
+    match:
+      call: ["ObjectInputStream.readObject", "ObjectInputStream.readUnshared", "XMLDecoder.readObject"]
+    message: >-
+      Desserializar objetos Java de fonte não confiável permite execução de
+      código via gadget chains.
+    remediation: >-
+      Troque por JSON (Jackson sem default typing) ou aplique um
+      ObjectInputFilter com allowlist de classes.
+    example: |
+      MeuDto dto = new ObjectMapper().readValue(json, MeuDto.class);
+
+  - id: java.crypto.weak-hash
+    title: Hash criptográfico fraco (MD5/SHA-1)
+    severity: medium
+    cwe: CWE-327
+    owasp: "A02:2021 - Cryptographic Failures"
+    match:
+      call: ["MessageDigest.getInstance"]
+      arg_in: {index: 0, values: ["MD5", "SHA-1", "SHA1", "md5", "sha1"]}
+    message: MD5 e SHA-1 não são seguros para senhas, assinaturas ou integridade.
+    remediation: Use SHA-256 para integridade e BCrypt/Argon2 para senhas.
+    example: |
+      MessageDigest md = MessageDigest.getInstance("SHA-256");
+
+  - id: java.crypto.weak-cipher
+    title: Algoritmo de cifra fraco ou modo ECB
+    severity: medium
+    cwe: CWE-327
+    owasp: "A02:2021 - Cryptographic Failures"
+    match:
+      call: ["Cipher.getInstance"]
+      arg_matches: {index: 0, regex: "(?i)^(DES|DESede|RC4|RC2|Blowfish)(/|$)|/ECB/|^AES$"}
+    message: DES/RC4 são quebrados e o modo ECB revela padrões do texto.
+    remediation: Use AES/GCM/NoPadding com IV aleatório por mensagem.
+    example: |
+      Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+
+  - id: java.random.insecure
+    title: java.util.Random para valores de segurança
+    severity: low
+    cwe: CWE-330
+    owasp: "A02:2021 - Cryptographic Failures"
+    match:
+      call: ["new Random"]
+    message: java.util.Random é previsível; não serve para tokens, senhas ou IDs de sessão.
+    remediation: Use java.security.SecureRandom.
+    example: |
+      SecureRandom random = new SecureRandom();

@@ -1,0 +1,175 @@
+# Regras determinísticas para Python.
+# Cada regra é avaliada sobre a AST (via Tree-sitter). Matchers disponíveis:
+#   call               lista de padrões (glob) para o nome qualificado da chamada
+#   arg_not_constant   índice de argumento que NÃO pode ser literal
+#   arg_dynamic_string índice de argumento que é string montada (f-string, +, %, .format)
+#   arg_in             {index, values}: argumento literal dentro da lista
+#   kwarg_equals       {nome: valor}: argumento nomeado igual ao literal
+#   kwarg_not_in       {nome: [valores]}: argumento ausente ou fora da lista segura
+
+language: python
+rules:
+  - id: python.command.os-system
+    title: Comando de sistema montado dinamicamente
+    severity: high
+    cwe: CWE-78
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["os.system", "os.popen", "commands.getoutput", "subprocess.getoutput", "subprocess.getstatusoutput"]
+      arg_not_constant: 0
+    message: >-
+      O comando passado ao shell é montado com valores variáveis. Se algum
+      deles vier do usuário, caracteres como ; | && executam comandos extras.
+    remediation: >-
+      Use subprocess.run com uma lista de argumentos (sem shell) e valide o
+      valor contra uma lista de opções permitidas.
+    example: |
+      import subprocess
+      subprocess.run(["ping", "-c", "1", host], check=True, timeout=10)
+
+  - id: python.command.subprocess-shell
+    title: subprocess com shell=True e comando variável
+    severity: high
+    cwe: CWE-78
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["subprocess.run", "subprocess.call", "subprocess.check_call", "subprocess.check_output", "subprocess.Popen"]
+      kwarg_equals: {shell: "True"}
+      arg_not_constant: 0
+    message: >-
+      shell=True faz o interpretador de comandos processar a string inteira;
+      qualquer parte variável vira um vetor de injeção de comandos.
+    remediation: >-
+      Remova shell=True e passe o comando como lista. Se precisar de recursos
+      do shell, escape cada valor com shlex.quote.
+    example: |
+      import subprocess
+      subprocess.run(["convert", filename, "out.png"], check=True)
+
+  - id: python.code.eval
+    title: Execução dinâmica de código (eval/exec)
+    severity: high
+    cwe: CWE-95
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["eval", "exec", "builtins.eval", "builtins.exec", "compile"]
+      arg_not_constant: 0
+    message: >-
+      eval/exec interpretam o argumento como código Python. Um valor
+      controlado pelo atacante vira execução remota de código.
+    remediation: >-
+      Para dados, use ast.literal_eval ou json.loads. Para escolher uma ação,
+      use um dicionário de funções permitidas.
+    example: |
+      import ast
+      valor = ast.literal_eval(texto)  # só literais, nunca código
+
+  - id: python.deserialization.pickle
+    title: Desserialização insegura (pickle e similares)
+    severity: high
+    cwe: CWE-502
+    owasp: "A08:2021 - Software and Data Integrity Failures"
+    match:
+      call: ["pickle.load", "pickle.loads", "cPickle.load", "cPickle.loads", "dill.load", "dill.loads", "marshal.load", "marshal.loads", "shelve.open", "jsonpickle.decode"]
+    message: >-
+      Formatos pickle podem conter objetos que executam código durante o
+      carregamento. Dados não confiáveis nunca devem ser despickleados.
+    remediation: >-
+      Troque por um formato só de dados (JSON). Se pickle for inevitável,
+      assine o conteúdo com HMAC e verifique antes de carregar.
+    example: |
+      import json
+      dados = json.loads(payload)
+
+  - id: python.deserialization.yaml-load
+    title: yaml.load sem SafeLoader
+    severity: medium
+    cwe: CWE-502
+    owasp: "A08:2021 - Software and Data Integrity Failures"
+    match:
+      call: ["yaml.load", "yaml.load_all", "yaml.unsafe_load"]
+      kwarg_not_in: {Loader: ["yaml.SafeLoader", "SafeLoader", "yaml.CSafeLoader", "CSafeLoader"]}
+    message: >-
+      O carregador padrão do PyYAML pode instanciar objetos Python a partir
+      de tags do documento.
+    remediation: Use yaml.safe_load ou passe Loader=yaml.SafeLoader.
+    example: |
+      import yaml
+      config = yaml.safe_load(conteudo)
+
+  - id: python.sql.string-built-query
+    title: SQL montado por concatenação/formatação
+    severity: medium
+    cwe: CWE-89
+    owasp: "A03:2021 - Injection"
+    match:
+      call: ["*.execute", "*.executemany", "*.executescript", "*.raw", "sqlalchemy.text", "text"]
+      arg_dynamic_string: 0
+    message: >-
+      A consulta SQL é montada com valores interpolados. Se algum deles vier
+      do usuário, ele altera a estrutura da consulta.
+    remediation: Use parâmetros da consulta (placeholders) em vez de interpolar valores.
+    example: |
+      cursor.execute("SELECT * FROM users WHERE id = %s", (user_id,))
+
+  - id: python.crypto.weak-hash
+    title: Hash criptográfico fraco (MD5/SHA-1)
+    severity: medium
+    cwe: CWE-327
+    owasp: "A02:2021 - Cryptographic Failures"
+    match:
+      call: ["hashlib.md5", "hashlib.sha1"]
+      kwarg_not_in: {usedforsecurity: ["False"]}
+    message: >-
+      MD5 e SHA-1 têm colisões práticas e não servem para senhas, assinaturas
+      ou integridade.
+    remediation: >-
+      Para integridade use hashlib.sha256; para senhas use argon2, bcrypt ou
+      hashlib.scrypt com sal.
+    example: |
+      import hashlib
+      digest = hashlib.sha256(dados).hexdigest()
+
+  - id: python.tls.verify-disabled
+    title: Verificação de certificado TLS desativada
+    severity: high
+    cwe: CWE-295
+    owasp: "A02:2021 - Cryptographic Failures"
+    match:
+      call: ["requests.*", "httpx.*", "requests.Session.*"]
+      kwarg_equals: {verify: "False"}
+    message: >-
+      verify=False aceita qualquer certificado, permitindo ataques
+      man-in-the-middle.
+    remediation: Mantenha a verificação ativa; para CA interna, passe o caminho do bundle em verify.
+    example: |
+      requests.get(url, timeout=5, verify="/etc/ssl/certs/ca-interna.pem")
+
+  - id: python.flask.debug-enabled
+    title: Aplicação Flask com debug=True
+    severity: medium
+    cwe: CWE-489
+    owasp: "A05:2021 - Security Misconfiguration"
+    match:
+      call: ["*.run"]
+      kwarg_equals: {debug: "True"}
+    message: >-
+      O modo debug do Flask expõe um console interativo que permite executar
+      código no servidor.
+    remediation: Controle o debug por variável de ambiente e nunca o habilite em produção.
+    example: |
+      app.run(debug=os.environ.get("FLASK_DEBUG") == "1")
+
+  - id: python.tempfile.mktemp
+    title: Arquivo temporário com nome previsível
+    severity: low
+    cwe: CWE-377
+    owasp: "A01:2021 - Broken Access Control"
+    match:
+      call: ["tempfile.mktemp"]
+    message: tempfile.mktemp cria uma condição de corrida entre gerar o nome e abrir o arquivo.
+    remediation: Use tempfile.NamedTemporaryFile ou tempfile.mkstemp.
+    example: |
+      import tempfile
+      with tempfile.NamedTemporaryFile() as tmp:
+          tmp.write(dados)

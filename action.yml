@@ -1,0 +1,69 @@
+name: "Sentinela Security Gate"
+description: "SAST multi-linguagem (Python, JavaScript, Java) com taint analysis, IA local opcional e Security Gate."
+branding:
+  icon: shield
+  color: red
+
+inputs:
+  diff-base:
+    description: "Ref base para analisar só os arquivos alterados (ex. origin/main). Vazio = repositório inteiro."
+    required: false
+    default: ""
+  policy:
+    description: "Arquivo de política do gate"
+    required: false
+    default: ".sentinela.yml"
+  ollama-url:
+    description: "URL de um Ollama acessível pelo runner para triagem por IA (opcional)"
+    required: false
+    default: ""
+  api-url:
+    description: "URL do servidor Sentinela para registrar o scan no dashboard (opcional)"
+    required: false
+    default: ""
+  api-token:
+    description: "Token da API do Sentinela"
+    required: false
+    default: ""
+  fail:
+    description: "Falhar o job quando o gate bloquear"
+    required: false
+    default: "true"
+
+outputs:
+  gate:
+    description: "passed | warned | failed"
+    value: ${{ steps.scan.outputs.gate }}
+
+runs:
+  using: composite
+  steps:
+    - name: Instalar o Sentinela
+      shell: bash
+      run: pip install --quiet "${{ github.action_path }}"
+
+    - name: Executar análise
+      id: scan
+      shell: bash
+      env:
+        SENTINELA_API_TOKEN: ${{ inputs.api-token }}
+      run: |
+        args=(scan . --policy "${{ inputs.policy }}" --sarif sentinela.sarif --markdown sentinela.md --json sentinela.json --no-fail)
+        [ -n "${{ inputs.diff-base }}" ] && args+=(--diff "${{ inputs.diff-base }}")
+        [ -n "${{ inputs.ollama-url }}" ] && args+=(--ai --ollama-url "${{ inputs.ollama-url }}")
+        [ -n "${{ inputs.api-url }}" ] && args+=(--api "${{ inputs.api-url }}")
+        sentinela "${args[@]}"
+        if [ -f sentinela.json ]; then
+          gate=$(python -c "import json;print(json.load(open('sentinela.json'))['gate']['status'])")
+        else
+          gate=passed
+        fi
+        echo "gate=$gate" >> "$GITHUB_OUTPUT"
+        if [ -f sentinela.md ]; then cat sentinela.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+    - name: Aplicar o gate
+      if: inputs.fail == 'true' && steps.scan.outputs.gate == 'failed'
+      shell: bash
+      run: |
+        echo "::error title=Sentinela::Security Gate bloqueou o merge. Veja o comentário no PR ou o resumo do job."
+        exit 1

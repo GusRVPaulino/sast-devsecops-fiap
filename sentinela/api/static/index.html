@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sentinela — Dashboard de Segurança</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><path d='M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z' fill='%23e5484d'/></svg>">
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/vendor/chart.umd.min.js" defer></script>
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><path d="M16 2 4 7v8c0 7.5 5.1 13.4 12 15 6.9-1.6 12-7.5 12-15V7z"/></svg>
+      <span>Sentinela</span>
+    </a>
+    <nav>
+      <label class="sr-only" for="project">Projeto</label>
+      <select id="project" aria-label="Projeto"></select>
+      <a href="#/">Visão geral</a>
+      <a href="#/scans">Scans</a>
+      <a href="#/regras">Regras</a>
+      <button id="new-scan" class="btn primary" type="button">Novo scan</button>
+    </nav>
+  </header>
+
+  <main id="view" aria-live="polite"></main>
+
+  <dialog id="scan-dialog">
+    <form id="scan-form" method="dialog">
+      <h2>Novo scan</h2>
+      <p class="muted">Envie um .zip com código Python, JavaScript ou Java.</p>
+      <label>Projeto <input name="project" required placeholder="minha-api"></label>
+      <label>Arquivo .zip <input name="archive" type="file" accept=".zip" required></label>
+      <label>Commit (opcional) <input name="commit_sha" placeholder="a1b2c3d"></label>
+      <p id="scan-error" class="error" hidden></p>
+      <menu>
+        <button type="button" class="btn" value="cancel" id="scan-cancel">Cancelar</button>
+        <button type="submit" class="btn primary" id="scan-submit">Analisar</button>
+      </menu>
+    </form>
+  </dialog>
+</body>
+</html>

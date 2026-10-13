@@ -1,0 +1,13 @@
+# Política do Security Gate do Sentinela para ESTE repositório.
+gate:
+  # Severidade mínima que pode bloquear o merge.
+  fail_on: high
+  # Só bloqueia com evidência forte: fluxo de dados comprovado (taint),
+  # dois motores concordando (ex. regra + Bandit) ou token de provedor.
+  # Achados com evidência única viram aviso.
+  require_strong_evidence: true
+  # Código propositalmente vulnerável usado em testes e no benchmark.
+  ignore_paths:
+    - "benchmark/corpus/*"
+    - "tests/fixtures/*"
+  ignore_rules: []

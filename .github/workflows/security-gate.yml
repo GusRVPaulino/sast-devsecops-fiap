@@ -1,0 +1,84 @@
+name: Security Gate
+
+# Cada Pull Request é analisado pelo próprio Sentinela. Os arquivos
+# alterados passam pelo motor SAST; o resultado vira comentário no PR,
+# relatório SARIF (aba Security) e o job falha quando o gate bloqueia.
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+
+jobs:
+  sentinela:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Análise SAST + Security Gate
+        id: gate
+        uses: ./
+        with:
+          diff-base: origin/${{ github.base_ref }}
+          # Defina a variável do repositório SENTINELA_OLLAMA_URL para ligar a IA
+          # (ex. um runner self-hosted com Ollama). Sem ela, roda sem IA.
+          ollama-url: ${{ vars.SENTINELA_OLLAMA_URL }}
+          api-url: ${{ vars.SENTINELA_API_URL }}
+          api-token: ${{ secrets.SENTINELA_API_TOKEN }}
+          fail: "false"
+        env:
+          SENTINELA_PR_NUMBER: ${{ github.event.pull_request.number }}
+
+      - name: Comentar no PR
+        if: always() && hashFiles('sentinela.md') != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('sentinela.md', 'utf8');
+            const marker = '<!-- sentinela-report -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const previous = comments.find(c => c.body && c.body.includes(marker));
+            if (previous) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: previous.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Guardar relatórios
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sentinela-relatorios
+          path: |
+            sentinela.sarif
+            sentinela.md
+            sentinela.json
+          if-no-files-found: ignore
+
+      # Repositórios privados precisam do GitHub Advanced Security para a aba
+      # Security; sem ele este passo falha sem afetar o gate.
+      - name: Enviar SARIF para o GitHub code scanning
+        if: always() && hashFiles('sentinela.sarif') != ''
+        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: sentinela.sarif
+          category: sentinela
+
+      - name: Aplicar o Security Gate
+        if: steps.gate.outputs.gate == 'failed'
+        run: |
+          echo "::error title=Security Gate::Vulnerabilidade com evidência forte encontrada. Veja o comentário do Sentinela no PR."
+          exit 1

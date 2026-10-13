@@ -1,0 +1,9 @@
+.git
+**/__pycache__
+*.db
+.venv
+.pytest_cache
+.ruff_cache
+*.sarif
+sentinela.md
+sentinela.json
