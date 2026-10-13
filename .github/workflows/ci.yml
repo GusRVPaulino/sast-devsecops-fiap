@@ -38,3 +38,49 @@ jobs:
       - name: Smoke test do container
         run: |
           docker run --rm sentinela:ci sentinela scan benchmark/corpus --no-fail --quiet --json /tmp/r.json
+
+  stack:
+    # Sobe o docker-compose inteiro (sem o profile de IA) e faz um scan de
+    # ponta a ponta pela API: API -> Redis -> worker-analysis -> Postgres.
+    runs-on: ubuntu-latest
+    needs: imagem
+    steps:
+      - uses: actions/checkout@v4
+      - name: Subir a stack
+        run: docker compose up -d --build --wait api worker-analysis worker-ai
+      - name: Scan de ponta a ponta pela API
+        run: |
+          python3 - <<'PY'
+          import json, time, urllib.request, pathlib
+
+          def call(path, body=None):
+              req = urllib.request.Request(
+                  f"http://localhost:8000{path}",
+                  data=json.dumps(body).encode() if body else None,
+                  headers={"Content-Type": "application/json"},
+              )
+              return json.load(urllib.request.urlopen(req, timeout=30))
+
+          files = [
+              {"path": p.as_posix(), "content": p.read_text()}
+              for p in pathlib.Path("benchmark/corpus/java").glob("*.java")
+          ]
+          scan = call("/api/scans", {"project": "ci-stack", "files": files})
+          assert scan["status"] == "queued", scan
+          for _ in range(60):
+              scan = call(f"/api/scans/{scan['id']}")
+              if scan["status"] in ("completed", "failed"):
+                  break
+              time.sleep(2)
+          print(json.dumps({k: scan[k] for k in ("status", "counts", "gate")}, indent=2, ensure_ascii=False))
+          assert scan["status"] == "completed", scan
+          assert scan["gate"]["status"] == "failed"
+          assert scan["counts"]["total"] >= 8
+          assert call("/api/scans/" + scan["id"] + "/sarif")["version"] == "2.1.0"
+          PY
+      - name: Logs em caso de falha
+        if: failure()
+        run: docker compose logs --no-color
+      - name: Derrubar
+        if: always()
+        run: docker compose down -v
